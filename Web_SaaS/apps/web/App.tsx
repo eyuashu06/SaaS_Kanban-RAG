@@ -143,6 +143,7 @@ export default function App() {
   const handleLogout = () => {
     safeStorage.removeItem('saas_authed_user_id');
     safeStorage.removeItem('saas_authed_token');
+    safeStorage.removeItem('saas_refresh_token');
     setIsAuthenticated(false);
     window.location.reload();
   };

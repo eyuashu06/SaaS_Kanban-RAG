@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   CheckSquare, ShieldCheck, Mail, Lock, User, Sparkles, 
-  ArrowRight, ShieldAlert, AlertCircle, Info, RefreshCw, KeyRound, Check
+  ArrowRight, ShieldAlert, Info, RefreshCw, KeyRound, Check
 } from 'lucide-react';
 import { 
   registerUser, 
@@ -26,6 +26,7 @@ interface AuthScreenProps {
 type AuthMode = 'login' | 'register' | 'forgot' | 'reset';
 
 export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
+  const googleAuthEnabled = import.meta.env.VITE_GOOGLE_OAUTH_ENABLED === 'true';
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,15 +40,33 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
   const [googleEmail, setGoogleEmail] = useState('');
   const [googleName, setGoogleName] = useState('');
 
+  const validatePasswordStrength = (candidatePassword: string): string | null => {
+    if (candidatePassword.length < 8) return 'Password must be at least 8 characters long.';
+    if (!/[a-z]/.test(candidatePassword)) return 'Password must include at least one lowercase letter.';
+    if (!/[A-Z]/.test(candidatePassword)) return 'Password must include at least one uppercase letter.';
+    if (!/[0-9]/.test(candidatePassword)) return 'Password must include at least one number.';
+    return null;
+  };
+
   const handleTraditionalAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (mode === 'login' && (!email || !password)) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedName = name.trim();
+
+    if (mode === 'login' && (!normalizedEmail || !password)) {
       setError('Please enter your email and password.');
       return;
     }
-    if (mode === 'register' && (!email || !password || !name)) {
+    if (mode === 'register' && (!normalizedEmail || !password || !normalizedName)) {
       setError('Please fully populate all required registration fields.');
       return;
+    }
+    if (mode === 'register') {
+      const passwordValidationError = validatePasswordStrength(password);
+      if (passwordValidationError) {
+        setError(passwordValidationError);
+        return;
+      }
     }
 
     setLoading(true);
@@ -56,7 +75,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
 
     try {
       if (mode === 'login') {
-        const response = await loginUser(email, password);
+        const response = await loginUser(normalizedEmail, password);
         safeStorage.setItem('saas_authed_user_id', response.user.id);
         if (response.token) {
           safeStorage.setItem('saas_authed_token', response.token);
@@ -66,7 +85,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
         }
         onAuthSuccess(response.user, response.state);
       } else if (mode === 'register') {
-        const response = await registerUser(name, email, password);
+        const response = await registerUser(normalizedName, normalizedEmail, password);
         safeStorage.setItem('saas_authed_user_id', response.user.id);
         if (response.token) {
           safeStorage.setItem('saas_authed_token', response.token);
@@ -85,7 +104,8 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
       setError('Email address is required to initiate password recovery.');
       return;
     }
@@ -95,7 +115,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
     setSuccessMessage(null);
 
     try {
-      const response = await forgotPassword(email);
+      const response = await forgotPassword(normalizedEmail);
       setSuccessMessage(response.message);
       // Autofill token for quick sandbox simulation testing
       if (response.resetToken) {
@@ -115,13 +135,18 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
       setError('Both reset PIN and password are required.');
       return;
     }
+    const passwordValidationError = validatePasswordStrength(newPassword);
+    if (passwordValidationError) {
+      setError(passwordValidationError);
+      return;
+    }
 
     setLoading(true);
     setError(null);
     setSuccessMessage(null);
 
     try {
-      const response = await resetPassword(resetToken, newPassword);
+      const response = await resetPassword(resetToken.trim(), newPassword);
       setSuccessMessage(response.message);
       setMode('login');
       setPassword('');
@@ -132,29 +157,12 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
     }
   };
 
-  const handleQuickLogin = async (presetEmail: string) => {
-    setLoading(true);
-    setError(null);
-    setSuccessMessage(null);
-    try {
-      const response = await loginUser(presetEmail, 'password123');
-      safeStorage.setItem('saas_authed_user_id', response.user.id);
-      if (response.token) {
-        safeStorage.setItem('saas_authed_token', response.token);
-      }
-      if (response.refreshToken) {
-        safeStorage.setItem('saas_refresh_token', response.refreshToken);
-      }
-      onAuthSuccess(response.user, response.state);
-    } catch (err: any) {
-      setError(err.message || 'Preset authentication lookup failed.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleGoogleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!googleAuthEnabled) {
+      setError('Google sign-in is currently unavailable. Please use email and password.');
+      return;
+    }
     if (!googleEmail || !googleName) {
       setError('Please fill in your Google Account details.');
       return;
@@ -163,7 +171,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await authenticateWithGoogle(googleName, googleEmail);
+      const response = await authenticateWithGoogle(googleName.trim(), googleEmail.trim().toLowerCase());
       safeStorage.setItem('saas_authed_user_id', response.user.id);
       if (response.token) {
         safeStorage.setItem('saas_authed_token', response.token);
@@ -305,41 +313,6 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
                 </motion.div>
               )}
             </AnimatePresence>
-
-            {/* Fast Credentials Presets Panel */}
-            {mode === 'login' && (
-              <div className="bg-amber-50 border border-amber-200/60 p-3.5 rounded-2xl text-xs text-amber-800 space-y-2">
-                <p className="font-semibold flex items-center gap-1.5 text-amber-900">
-                  <AlertCircle className="w-3.5 h-3.5" /> Fast Credentials Testing Presets (Double-Click):
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <button 
-                    onClick={() => handleQuickLogin('alice.admin@kanban.com')}
-                    disabled={loading}
-                    className="bg-white hover:bg-amber-100 border border-amber-200/60 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left transition select-none cursor-pointer"
-                  >
-                    <span className="font-bold text-indigo-700">Admin Context</span><br />
-                    alice.admin@kanban.com
-                  </button>
-                  <button 
-                    onClick={() => handleQuickLogin('bob.user@kanban.com')}
-                    disabled={loading}
-                    className="bg-white hover:bg-amber-100 border border-amber-200/60 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left transition select-none cursor-pointer"
-                  >
-                    <span className="font-bold text-slate-700">Member Context</span><br />
-                    bob.user@kanban.com
-                  </button>
-                  <button 
-                    onClick={() => handleQuickLogin('carol.view@kanban.com')}
-                    disabled={loading}
-                    className="bg-white hover:bg-amber-100 border border-amber-200/60 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left transition select-none cursor-pointer"
-                  >
-                    <span className="font-bold text-indigo-900">Viewer Context</span><br />
-                    carol.view@kanban.com
-                  </button>
-                </div>
-              </div>
-            )}
 
             {/* Login & Register Forms */}
             {(mode === 'login' || mode === 'register') && (
@@ -516,7 +489,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
           </div>
 
           {/* Social Google connect */}
-          {mode === 'login' && (
+          {mode === 'login' && googleAuthEnabled && (
             <div className="border-t border-slate-200 pt-5 text-center">
               <p className="text-xs text-slate-400 mb-3.5">— Or connect with enterprise credentials —</p>
               <button
